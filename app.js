@@ -149,10 +149,17 @@ function renderEarthquakes() {
     });
 
     row.addEventListener("click", () => {
-      selectEarthquake(quake.id);
+    selectEarthquake(quake.id);
 
-      map.setView([latitude, longitude], 8);
-      marker.openPopup();
+    map.setView([latitude, longitude], 8);
+    marker.openPopup();
+
+    if (window.innerWidth <= 768) {
+        document.getElementById("map").scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+        });
+    }
     });
 
     marker.on("click", () => {
