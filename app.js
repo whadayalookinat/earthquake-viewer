@@ -1,0 +1,119 @@
+const CENTER_LAT = 47.5;
+const CENTER_LON = -121.5;
+
+const RADIUS_MILES = 500;
+const RADIUS_KM = Math.round(RADIUS_MILES * 1.60934);
+
+const MIN_MAGNITUDE = 2.5;
+
+let displayCount = 10;
+let earthquakes = [];
+let markers = [];
+
+const map = L.map("map").setView([CENTER_LAT, CENTER_LON], 5);
+
+L.tileLayer(
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }
+).addTo(map);
+
+const earthquakeLayer = L.layerGroup().addTo(map);
+
+const apiUrl =
+  "https://earthquake.usgs.gov/fdsnws/event/1/query" +
+  "?format=geojson" +
+  "&latitude=" + CENTER_LAT +
+  "&longitude=" + CENTER_LON +
+  "&maxradiuskm=" + RADIUS_KM +
+  "&minmagnitude=" + MIN_MAGNITUDE +
+  "&limit=100" +
+  "&orderby=time";
+
+async function loadEarthquakes() {
+  const status = document.getElementById("status");
+
+  try {
+    const response = await fetch(apiUrl);
+
+    if (!response.ok) {
+      throw new Error(`USGS returned ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    earthquakes = data.features;
+
+    status.textContent =
+      `${earthquakes.length} recent M${MIN_MAGNITUDE}+ earthquakes found within ${RADIUS_MILES} miles.`;
+
+    renderEarthquakes();
+  } catch (error) {
+    console.error(error);
+    status.textContent = "Unable to load earthquake data.";
+  }
+}
+
+function renderEarthquakes() {
+  const tbody = document.getElementById("earthquake-list");
+
+  tbody.innerHTML = "";
+  earthquakeLayer.clearLayers();
+  markers = [];
+
+  earthquakes.slice(0, displayCount).forEach((quake) => {
+    const properties = quake.properties;
+    const coordinates = quake.geometry.coordinates;
+
+    const longitude = coordinates[0];
+    const latitude = coordinates[1];
+    const depth = coordinates[2];
+
+    const time = new Date(properties.time).toLocaleString();
+
+    const row = document.createElement("tr");
+
+    row.innerHTML = `
+      <td>${time}</td>
+      <td>${properties.mag.toFixed(1)}</td>
+      <td>${properties.place}</td>
+      <td>${depth.toFixed(1)} km</td>
+    `;
+
+    tbody.appendChild(row);
+
+    const marker = L.circleMarker([latitude, longitude], {
+      radius: Math.max(5, properties.mag * 2)
+    });
+
+    marker.bindPopup(`
+      <strong>M${properties.mag.toFixed(1)}</strong><br>
+      ${properties.place}<br>
+      Depth: ${depth.toFixed(1)} km<br>
+      ${time}
+    `);
+
+    marker.addTo(earthquakeLayer);
+    markers.push(marker);
+
+    row.addEventListener("click", () => {
+      map.setView([latitude, longitude], 8);
+      marker.openPopup();
+    });
+  });
+}
+
+document
+  .getElementById("toggle-count")
+  .addEventListener("click", () => {
+    displayCount = displayCount === 10 ? 100 : 10;
+
+    document.getElementById("toggle-count").textContent =
+      displayCount === 10 ? "Show 100" : "Show 10";
+
+    renderEarthquakes();
+  });
+
+loadEarthquakes();

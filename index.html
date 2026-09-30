@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pacific Northwest Earthquakes</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  >
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <header>
+    <h1>Pacific Northwest Earthquakes</h1>
+    <p>M2.5+ earthquakes within 500 miles</p>
+  </header>
+
+  <main>
+    <div id="map"></div>
+
+    <section class="earthquake-section">
+      <div class="section-header">
+        <h2>Recent Earthquakes</h2>
+        <button id="toggle-count">Show 100</button>
+      </div>
+
+      <div id="status">Loading earthquakes...</div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Magnitude</th>
+              <th>Location</th>
+              <th>Depth</th>
+            </tr>
+          </thead>
+          <tbody id="earthquake-list"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
