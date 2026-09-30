@@ -9,6 +9,8 @@ const MIN_MAGNITUDE = 2.5;
 let displayCount = 10;
 let earthquakes = [];
 let markers = [];
+let sortColumn = "time";
+let sortDirection = "desc";
 
 const map = L.map("map").setView([CENTER_LAT, CENTER_LON], 5);
 
@@ -56,6 +58,47 @@ async function loadEarthquakes() {
   }
 }
 
+function getDisplayedEarthquakes() {
+  // First choose the newest 10/100 earthquakes.
+  // Sorting changes their display order, not which events are included.
+  const displayed = earthquakes.slice(0, displayCount);
+
+  displayed.sort((a, b) => {
+    let valueA;
+    let valueB;
+
+    switch (sortColumn) {
+      case "time":
+        valueA = a.properties.time;
+        valueB = b.properties.time;
+        break;
+
+      case "magnitude":
+        valueA = a.properties.mag;
+        valueB = b.properties.mag;
+        break;
+
+      case "location":
+        valueA = a.properties.place || "";
+        valueB = b.properties.place || "";
+        return sortDirection === "asc"
+          ? valueA.localeCompare(valueB)
+          : valueB.localeCompare(valueA);
+
+      case "depth":
+        valueA = a.geometry.coordinates[2];
+        valueB = b.geometry.coordinates[2];
+        break;
+    }
+
+    return sortDirection === "asc"
+      ? valueA - valueB
+      : valueB - valueA;
+  });
+
+  return displayed;
+}
+
 function renderEarthquakes() {
   const tbody = document.getElementById("earthquake-list");
 
@@ -63,7 +106,7 @@ function renderEarthquakes() {
   earthquakeLayer.clearLayers();
   markers = [];
 
-  earthquakes.slice(0, displayCount).forEach((quake) => {
+  getDisplayedEarthquakes().forEach((quake) => {
     const properties = quake.properties;
     const coordinates = quake.geometry.coordinates;
 
@@ -74,6 +117,9 @@ function renderEarthquakes() {
     const time = new Date(properties.time).toLocaleString();
 
     const row = document.createElement("tr");
+
+    // Stable connection between this row and the USGS earthquake.
+    row.dataset.eventId = quake.id;
 
     row.innerHTML = `
       <td>${time}</td>
@@ -96,14 +142,48 @@ function renderEarthquakes() {
     `);
 
     marker.addTo(earthquakeLayer);
-    markers.push(marker);
+
+    markers.push({
+      eventId: quake.id,
+      marker: marker
+    });
 
     row.addEventListener("click", () => {
+      selectEarthquake(quake.id);
+
       map.setView([latitude, longitude], 8);
       marker.openPopup();
     });
+
+    marker.on("click", () => {
+      selectEarthquake(quake.id, true);
+    });
   });
 }
+
+function selectEarthquake(eventId, scrollToRow = false) {
+  document.querySelectorAll("#earthquake-list tr").forEach((row) => {
+    row.classList.remove("selected");
+  });
+
+  const selectedRow = document.querySelector(
+    `#earthquake-list tr[data-event-id="${eventId}"]`
+  );
+
+  if (!selectedRow) {
+    return;
+  }
+
+  selectedRow.classList.add("selected");
+
+  if (scrollToRow) {
+    selectedRow.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+  }
+}
+
 
 document
   .getElementById("toggle-count")
@@ -115,5 +195,37 @@ document
 
     renderEarthquakes();
   });
+
+document.querySelectorAll("th.sortable").forEach((header) => {
+  header.addEventListener("click", () => {
+    const selectedColumn = header.dataset.sort;
+
+    if (sortColumn === selectedColumn) {
+      sortDirection = sortDirection === "asc" ? "desc" : "asc";
+    } else {
+      sortColumn = selectedColumn;
+
+      // Sensible first-click defaults.
+      sortDirection =
+        selectedColumn === "location" ? "asc" : "desc";
+    }
+
+    updateSortIndicators();
+    renderEarthquakes();
+  });
+});
+
+function updateSortIndicators() {
+  document.querySelectorAll("th.sortable").forEach((header) => {
+    const indicator = header.querySelector(".sort-indicator");
+
+    if (header.dataset.sort === sortColumn) {
+      indicator.textContent =
+        sortDirection === "asc" ? "▲" : "▼";
+    } else {
+      indicator.textContent = "";
+    }
+  });
+}
 
 loadEarthquakes();
