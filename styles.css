@@ -129,6 +129,7 @@ th.sortable:hover {
 
   #map {
     height: 260px;
+    scroll-margin-top: 10px;
   }
 
   .earthquake-section {
@@ -137,18 +138,57 @@ th.sortable:hover {
   }
 
   .table-wrapper {
-    max-height: 350px;
-    overflow: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   table {
-    min-width: 600px;
+    width: 100%;
+    table-layout: fixed;
   }
 
   th,
   td {
-    padding: 8px;
-    font-size: 0.9rem;
+    padding: 6px 4px;
+    font-size: 0.82rem;
+  }
+
+  th:nth-child(1),
+  td:nth-child(1) {
+    width: 25%;
+  }
+
+  th:nth-child(2),
+  td:nth-child(2) {
+    width: 16%;
+    text-align: center;
+  }
+
+  th:nth-child(3),
+  td:nth-child(3) {
+    width: 41%;
+  }
+
+  th:nth-child(4),
+  td:nth-child(4) {
+    width: 18%;
+  }
+
+  th:not(:nth-child(3)),
+  td:not(:nth-child(3)) {
     white-space: nowrap;
   }
+
+  .sort-indicator:empty {
+    display: none;
+  }
+
+  .location-text {
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
 }

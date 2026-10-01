@@ -113,8 +113,25 @@ function renderEarthquakes() {
     const longitude = coordinates[0];
     const latitude = coordinates[1];
     const depth = coordinates[2];
-
-    const time = new Date(properties.time).toLocaleString();
+    const depthMiles = depth * 0.621371;
+    const place = (properties.place || "").replace(
+      /^(\d+(?:\.\d+)?) km\b/,
+      (_, distanceKm) => `${Math.round(Number(distanceKm) * 0.621371)} mi`
+    );
+    const eventDate = new Date(properties.time);
+    
+    const time = window.innerWidth <= 768
+    ? eventDate.toLocaleString("en-US", {
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+        })
+        .replace(",", "")
+        .replace(" AM", "A")
+        .replace(" PM", "P")
+    : eventDate.toLocaleString();
 
     const row = document.createElement("tr");
 
@@ -122,11 +139,11 @@ function renderEarthquakes() {
     row.dataset.eventId = quake.id;
 
     row.innerHTML = `
-      <td>${time}</td>
-      <td>${properties.mag.toFixed(1)}</td>
-      <td>${properties.place}</td>
-      <td>${depth.toFixed(1)} km</td>
-    `;
+        <td>${time}</td>
+        <td>${properties.mag.toFixed(1)}</td>
+        <td><div class="location-text">${place}</div></td>
+        <td>${depthMiles.toFixed(1)} mi</td>
+        `;
 
     tbody.appendChild(row);
 
@@ -136,8 +153,8 @@ function renderEarthquakes() {
 
     marker.bindPopup(`
       <strong>M${properties.mag.toFixed(1)}</strong><br>
-      ${properties.place}<br>
-      Depth: ${depth.toFixed(1)} km<br>
+      ${place}<br>
+      Depth: ${depthMiles.toFixed(1)} mi<br>
       ${time}
     `);
 
