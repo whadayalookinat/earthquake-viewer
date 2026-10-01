@@ -36,6 +36,10 @@ main {
   border-radius: 8px;
 }
 
+#map-tip {
+  display: none;
+}
+
 .map-layer-controls {
   display: flex;
   flex-direction: column;
@@ -59,6 +63,12 @@ main {
 .map-layer-controls input {
   margin: 0;
   accent-color: #4f6850;
+}
+
+.map-layer-loading {
+  color: #666;
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .earthquake-section {
@@ -157,6 +167,14 @@ th.sortable:hover {
     scroll-margin-top: 10px;
   }
 
+  #map-tip {
+    display: block;
+    margin: 6px 2px 0;
+    color: #68716f;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
   .earthquake-section {
     margin-top: 10px;
     padding: 12px;
@@ -212,6 +230,7 @@ th.sortable:hover {
     line-height: 1.2;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

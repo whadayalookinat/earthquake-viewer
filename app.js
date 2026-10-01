@@ -168,9 +168,15 @@ async function loadFaultLayer() {
   await faultLayerPromise;
 }
 
-function addLayerToggle(container, id, labelText, layer, loadLayer) {
+function addLayerToggle(container, id, labelText, layer, loadLayer, loadingMessage = "") {
   const label = document.createElement("label");
   label.htmlFor = id;
+
+  let layerLoaded = false;
+  const loading = document.createElement("span");
+  loading.className = "map-layer-loading";
+  loading.textContent = loadingMessage;
+  loading.hidden = true;
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
@@ -182,18 +188,23 @@ function addLayerToggle(container, id, labelText, layer, loadLayer) {
     }
 
     checkbox.disabled = true;
+    if (!layerLoaded && loadingMessage) {
+      loading.hidden = false;
+    }
     try {
       await loadLayer();
       layer.addTo(map);
+      layerLoaded = true;
     } catch (error) {
       console.error(`Unable to load ${labelText} layer`, error);
       checkbox.checked = false;
     } finally {
+      loading.hidden = true;
       checkbox.disabled = false;
     }
   });
 
-  label.append(checkbox, document.createTextNode(` ${labelText}`));
+  label.append(checkbox, document.createTextNode(` ${labelText}`), loading);
   container.appendChild(label);
 }
 
@@ -212,7 +223,8 @@ geologyLayerControl.onAdd = () => {
     "faults-toggle",
     "〰 Faults",
     faultLayer,
-    loadFaultLayer
+    loadFaultLayer,
+    "Loading…"
   );
   L.DomEvent.disableClickPropagation(container);
   return container;
