@@ -36,6 +36,31 @@ main {
   border-radius: 8px;
 }
 
+.map-layer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+  color: #222;
+  font-size: 14px;
+}
+
+.map-layer-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.map-layer-controls input {
+  margin: 0;
+  accent-color: #4f6850;
+}
+
 .earthquake-section {
   margin-top: 20px;
   background: white;

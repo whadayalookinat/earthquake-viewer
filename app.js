@@ -28,6 +28,197 @@ L.tileLayer(
 
 const earthquakeLayer = L.layerGroup().addTo(map);
 
+map.createPane("faultPane").style.zIndex = 350;
+map.createPane("volcanoPane").style.zIndex = 390;
+
+const volcanoLayer = L.geoJSON(null, {
+  pointToLayer: (feature, latlng) =>
+    L.circleMarker(latlng, {
+      pane: "volcanoPane",
+      radius: 7,
+      color: "#713b16",
+      weight: 1.5,
+      fillColor: "#f0a52b",
+      fillOpacity: 0.95
+    }),
+  onEachFeature: (feature, layer) => {
+    const popup = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = feature.properties.name || "Unnamed volcano";
+    popup.appendChild(name);
+
+    if (feature.properties.status) {
+      const status = document.createElement("div");
+      status.textContent = feature.properties.status;
+      popup.appendChild(status);
+    }
+
+    layer.bindPopup(popup);
+  }
+});
+
+const faultRenderer = L.canvas({ pane: "faultPane" });
+const faultLayer = L.geoJSON(null, {
+  renderer: faultRenderer,
+  style: {
+    color: "#5d5960",
+    weight: 1.25,
+    opacity: 0.45
+  },
+  onEachFeature: (feature, layer) => {
+    const faultName = feature.properties.fault_name;
+    if (faultName) {
+      const popup = document.createElement("span");
+      popup.textContent = faultName;
+      layer.bindPopup(popup);
+    }
+  }
+});
+
+const volcanoApiUrl =
+  "https://volcanoes.usgs.gov/vsc/api/volcanoApi/regionstatus" +
+  "?lat1=-90&long1=-1350&lat2=90&long2=1350";
+const faultsQueryUrl =
+  "https://earthquake.usgs.gov/arcgis/rest/services/haz/Qfaults/MapServer/21/query";
+let volcanoLayerPromise;
+let faultLayerPromise;
+
+async function loadVolcanoLayer() {
+  if (!volcanoLayerPromise) {
+    volcanoLayerPromise = (async () => {
+      const response = await fetch(volcanoApiUrl);
+      if (!response.ok) {
+        throw new Error(`USGS Volcano API returned ${response.status}`);
+      }
+
+      const volcanoes = await response.json();
+      const features = volcanoes
+        .filter((volcano) =>
+          Number.isFinite(Number(volcano.lat)) &&
+          Number.isFinite(Number(volcano.long))
+        )
+        .map((volcano) => ({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [Number(volcano.long), Number(volcano.lat)]
+          },
+          properties: {
+            name: volcano.vName,
+            status: volcano.alertLevel || volcano.colorCode
+          }
+        }));
+
+      volcanoLayer.addData({ type: "FeatureCollection", features });
+    })().catch((error) => {
+      volcanoLayerPromise = null;
+      throw error;
+    });
+  }
+
+  await volcanoLayerPromise;
+}
+
+async function loadFaultLayer() {
+  if (!faultLayerPromise) {
+    faultLayerPromise = (async () => {
+      const features = [];
+      let resultOffset = 0;
+
+      while (true) {
+        const params = new URLSearchParams({
+          where: "1=1",
+          outFields: "fault_name",
+          outSR: "4326",
+          f: "geojson",
+          orderByFields: "OBJECTID",
+          resultOffset: String(resultOffset),
+          resultRecordCount: "2000"
+        });
+        const response = await fetch(`${faultsQueryUrl}?${params}`);
+        if (!response.ok) {
+          throw new Error(`USGS Faults API returned ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.error) {
+          throw new Error(data.error.message || "USGS Faults API query failed");
+        }
+
+        const page = data.features || [];
+        features.push(...page);
+
+        if (!data.exceededTransferLimit) {
+          break;
+        }
+        if (page.length === 0) {
+          throw new Error("USGS Faults API returned an empty page");
+        }
+
+        resultOffset += page.length;
+      }
+
+      faultLayer.addData({ type: "FeatureCollection", features });
+    })().catch((error) => {
+      faultLayerPromise = null;
+      throw error;
+    });
+  }
+
+  await faultLayerPromise;
+}
+
+function addLayerToggle(container, id, labelText, layer, loadLayer) {
+  const label = document.createElement("label");
+  label.htmlFor = id;
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.id = id;
+  checkbox.addEventListener("change", async () => {
+    if (!checkbox.checked) {
+      layer.remove();
+      return;
+    }
+
+    checkbox.disabled = true;
+    try {
+      await loadLayer();
+      layer.addTo(map);
+    } catch (error) {
+      console.error(`Unable to load ${labelText} layer`, error);
+      checkbox.checked = false;
+    } finally {
+      checkbox.disabled = false;
+    }
+  });
+
+  label.append(checkbox, document.createTextNode(` ${labelText}`));
+  container.appendChild(label);
+}
+
+const geologyLayerControl = L.control({ position: "topright" });
+geologyLayerControl.onAdd = () => {
+  const container = L.DomUtil.create("div", "map-layer-controls");
+  addLayerToggle(
+    container,
+    "volcanoes-toggle",
+    "🌋 Volcanoes",
+    volcanoLayer,
+    loadVolcanoLayer
+  );
+  addLayerToggle(
+    container,
+    "faults-toggle",
+    "〰 Faults",
+    faultLayer,
+    loadFaultLayer
+  );
+  L.DomEvent.disableClickPropagation(container);
+  return container;
+};
+geologyLayerControl.addTo(map);
+
 const apiUrl =
   "https://earthquake.usgs.gov/fdsnws/event/1/query" +
   "?format=geojson" +
