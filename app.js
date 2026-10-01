@@ -14,6 +14,10 @@ let sortDirection = "desc";
 
 const map = L.map("map").setView([CENTER_LAT, CENTER_LON], 5);
 
+if (window.innerWidth <= 768) {
+  map.dragging.disable();
+}
+
 L.tileLayer(
   "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
   {
