@@ -1,16 +1,24 @@
 const CENTER_LAT = 47.5;
 const CENTER_LON = -121.5;
 
-const RADIUS_MILES = 500;
-const RADIUS_KM = Math.round(RADIUS_MILES * 1.60934);
-
 const MIN_MAGNITUDE = 2.5;
+const DAYS_BACK = 7;
+const EARTHQUAKE_RESULT_CAP = 5000;
+const EARTHQUAKE_REQUEST_LIMIT = EARTHQUAKE_RESULT_CAP + 1;
+const MAP_QUERY_DEBOUNCE_MS = 350;
 
 let displayCount = 10;
 let earthquakes = [];
 let markers = [];
 let sortColumn = "time";
 let sortDirection = "desc";
+let selectedEventId = null;
+let earthquakeRequestController = null;
+let earthquakeRequestId = 0;
+let earthquakeLoadTimer = null;
+let lastEarthquakeBoundsKey = null;
+let activeEarthquakeBoundsKey = null;
+let programmaticMapMove = false;
 
 const map = L.map("map").setView([CENTER_LAT, CENTER_LON], 5);
 
@@ -231,44 +239,182 @@ geologyLayerControl.onAdd = () => {
 };
 geologyLayerControl.addTo(map);
 
-const apiUrl =
-  "https://earthquake.usgs.gov/fdsnws/event/1/query" +
-  "?format=geojson" +
-  "&latitude=" + CENTER_LAT +
-  "&longitude=" + CENTER_LON +
-  "&maxradiuskm=" + RADIUS_KM +
-  "&minmagnitude=" + MIN_MAGNITUDE +
-  "&limit=100" +
-  "&orderby=time";
+const earthquakeApiUrl = "https://earthquake.usgs.gov/fdsnws/event/1/query";
 
-async function loadEarthquakes() {
+function wrapLongitude(longitude) {
+  return ((longitude + 180) % 360 + 360) % 360 - 180;
+}
+
+function getEarthquakeBounds() {
+  const bounds = map.getBounds();
+  const south = Math.max(-90, bounds.getSouth());
+  const north = Math.min(90, bounds.getNorth());
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+
+  if (east - west >= 360) {
+    return {
+      south,
+      north,
+      segments: [{ minlongitude: -180, maxlongitude: 180 }]
+    };
+  }
+
+  const wrappedWest = wrapLongitude(west);
+  const wrappedEast = wrapLongitude(east);
+  const segments = wrappedWest <= wrappedEast
+    ? [{ minlongitude: wrappedWest, maxlongitude: wrappedEast }]
+    : [
+        { minlongitude: wrappedWest, maxlongitude: 180 },
+        { minlongitude: -180, maxlongitude: wrappedEast }
+      ];
+
+  return { south, north, segments };
+}
+
+function getBoundsKey(bounds) {
+  const rounded = (value) => Math.round(value * 100) / 100;
+  return [
+    rounded(bounds.south),
+    rounded(bounds.north),
+    ...bounds.segments.flatMap((segment) => [
+      rounded(segment.minlongitude),
+      rounded(segment.maxlongitude)
+    ])
+  ].join(",");
+}
+
+function getEarthquakeQueryUrl(bounds, segment, startTime) {
+  const params = new URLSearchParams({
+    format: "geojson",
+    minlatitude: String(bounds.south),
+    maxlatitude: String(bounds.north),
+    minlongitude: String(segment.minlongitude),
+    maxlongitude: String(segment.maxlongitude),
+    minmagnitude: String(MIN_MAGNITUDE),
+    starttime: startTime,
+    limit: String(EARTHQUAKE_REQUEST_LIMIT),
+    orderby: "time"
+  });
+  return `${earthquakeApiUrl}?${params}`;
+}
+
+async function loadEarthquakes(bounds, boundsKey) {
+  const requestId = ++earthquakeRequestId;
+  const controller = new AbortController();
+  earthquakeRequestController = controller;
+  activeEarthquakeBoundsKey = boundsKey;
   const status = document.getElementById("status");
+  const startTime = new Date(
+    Date.now() - DAYS_BACK * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const boundsDescription = bounds.segments.length > 1
+    ? "the current map area (crossing the International Date Line)"
+    : "the current map area";
+  status.textContent = `Loading M${MIN_MAGNITUDE}+ earthquakes from the past ${DAYS_BACK} days for ${boundsDescription}…`;
 
   try {
-    const response = await fetch(apiUrl);
+    const responses = await Promise.all(bounds.segments.map(async (segment) => {
+      const response = await fetch(
+        getEarthquakeQueryUrl(bounds, segment, startTime),
+        { signal: controller.signal }
+      );
+      if (!response.ok) {
+        throw new Error(`USGS returned HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      if (!Array.isArray(data.features)) {
+        throw new Error("USGS returned an invalid earthquake response");
+      }
+      return data;
+    }));
 
-    if (!response.ok) {
-      throw new Error(`USGS returned ${response.status}`);
+    if (requestId !== earthquakeRequestId) {
+      return;
     }
 
-    const data = await response.json();
+    const featuresById = new Map();
+    let sourceLimitReached = false;
+    responses.forEach((data) => {
+      data.features.forEach((feature) => featuresById.set(feature.id, feature));
+      const reportedCount = Number(data.metadata && data.metadata.count);
+      if (
+        data.features.length >= EARTHQUAKE_REQUEST_LIMIT ||
+        (Number.isFinite(reportedCount) && reportedCount > data.features.length)
+      ) {
+        sourceLimitReached = true;
+      }
+    });
 
-    earthquakes = data.features;
-
-    status.textContent =
-      `${earthquakes.length} recent M${MIN_MAGNITUDE}+ earthquakes found within ${RADIUS_MILES} miles.`;
-
+    earthquakes = Array.from(featuresById.values())
+      .sort((a, b) => b.properties.time - a.properties.time);
+    let safetyCapReached = false;
+    if (earthquakes.length > EARTHQUAKE_RESULT_CAP) {
+      earthquakes = earthquakes.slice(0, EARTHQUAKE_RESULT_CAP);
+      safetyCapReached = true;
+    }
+    if (selectedEventId && !earthquakes.some((quake) => quake.id === selectedEventId)) {
+      selectedEventId = null;
+    }
+    lastEarthquakeBoundsKey = boundsKey;
     renderEarthquakes();
+
+    if (safetyCapReached) {
+      status.textContent = `Showing the newest ${earthquakes.length} matching earthquakes (safety cap; more may match).`;
+    } else if (sourceLimitReached) {
+      status.textContent = `USGS reached its result limit; showing ${earthquakes.length} returned earthquakes. More may match this map area.`;
+    } else if (earthquakes.length === 0) {
+      status.textContent = `No M${MIN_MAGNITUDE}+ earthquakes were found in the current map area during the past ${DAYS_BACK} days.`;
+    } else {
+      status.textContent = `${earthquakes.length} matching M${MIN_MAGNITUDE}+ earthquakes from the past ${DAYS_BACK} days in the current map area.`;
+    }
   } catch (error) {
+    if (error.name === "AbortError" || requestId !== earthquakeRequestId) {
+      return;
+    }
     console.error(error);
-    status.textContent = "Unable to load earthquake data.";
+    status.textContent = `Unable to load earthquake data from USGS: ${error.message}. Previous results remain visible, if available.`;
+  } finally {
+    if (requestId === earthquakeRequestId) {
+      earthquakeRequestController = null;
+      activeEarthquakeBoundsKey = null;
+    }
   }
+}
+
+function scheduleEarthquakeLoad() {
+  clearTimeout(earthquakeLoadTimer);
+  const bounds = getEarthquakeBounds();
+  const boundsKey = getBoundsKey(bounds);
+  if (
+    earthquakeRequestController &&
+    activeEarthquakeBoundsKey !== boundsKey
+  ) {
+    earthquakeRequestController.abort();
+    earthquakeRequestController = null;
+    activeEarthquakeBoundsKey = null;
+    earthquakeRequestId += 1;
+  }
+  earthquakeLoadTimer = setTimeout(() => {
+    if (
+      boundsKey !== lastEarthquakeBoundsKey &&
+      activeEarthquakeBoundsKey !== boundsKey
+    ) {
+      loadEarthquakes(bounds, boundsKey);
+    }
+  }, MAP_QUERY_DEBOUNCE_MS);
 }
 
 function getDisplayedEarthquakes() {
   // First choose the newest 10/100 earthquakes.
   // Sorting changes their display order, not which events are included.
   const displayed = earthquakes.slice(0, displayCount);
+  const selectedEarthquake = earthquakes.find(
+    (quake) => quake.id === selectedEventId
+  );
+  if (selectedEarthquake && !displayed.includes(selectedEarthquake)) {
+    displayed[displayed.length - 1] = selectedEarthquake;
+  }
 
   displayed.sort((a, b) => {
     let valueA;
@@ -312,8 +458,11 @@ function renderEarthquakes() {
   tbody.innerHTML = "";
   earthquakeLayer.clearLayers();
   markers = [];
+  const rowsByEventId = new Map();
+  const markersByEventId = new Map();
 
-  getDisplayedEarthquakes().forEach((quake) => {
+  const displayedEarthquakes = getDisplayedEarthquakes();
+  displayedEarthquakes.forEach((quake) => {
     const properties = quake.properties;
     const coordinates = quake.geometry.coordinates;
 
@@ -345,25 +494,51 @@ function renderEarthquakes() {
     // Stable connection between this row and the USGS earthquake.
     row.dataset.eventId = quake.id;
 
-    row.innerHTML = `
-        <td>${time}</td>
-        <td>${properties.mag.toFixed(1)}</td>
-        <td><div class="location-text">${place}</div></td>
-        <td>${depthMiles.toFixed(1)} mi</td>
-        `;
+    [time, properties.mag.toFixed(1), place, `${depthMiles.toFixed(1)} mi`]
+      .forEach((text, index) => {
+        const cell = document.createElement("td");
+        if (index === 2) {
+          const location = document.createElement("div");
+          location.className = "location-text";
+          location.textContent = text;
+          cell.appendChild(location);
+        } else {
+          cell.textContent = text;
+        }
+        row.appendChild(cell);
+      });
 
     tbody.appendChild(row);
+    rowsByEventId.set(quake.id, row);
+  });
 
+  earthquakes.forEach((quake) => {
+    const properties = quake.properties;
+    const coordinates = quake.geometry.coordinates;
+    const latitude = coordinates[1];
+    const longitude = coordinates[0];
+    const depthMiles = coordinates[2] * 0.621371;
+    const place = (properties.place || "").replace(
+      /^(\d+(?:\.\d+)?) km\b/,
+      (_, distanceKm) => `${Math.round(Number(distanceKm) * 0.621371)} mi`
+    );
+    const eventDate = new Date(properties.time);
+    const time = eventDate.toLocaleString();
     const marker = L.circleMarker([latitude, longitude], {
       radius: Math.max(5, properties.mag * 2)
     });
 
-    marker.bindPopup(`
-      <strong>M${properties.mag.toFixed(1)}</strong><br>
-      ${place}<br>
-      Depth: ${depthMiles.toFixed(1)} mi<br>
-      ${time}
-    `);
+    const popup = document.createElement("div");
+    const magnitude = document.createElement("strong");
+    magnitude.textContent = `M${properties.mag.toFixed(1)}`;
+    popup.append(magnitude, document.createElement("br"));
+    popup.append(document.createTextNode(place), document.createElement("br"));
+    popup.append(
+      document.createTextNode(`Depth: ${depthMiles.toFixed(1)} mi`),
+      document.createElement("br"),
+      document.createTextNode(time)
+    );
+    marker.bindPopup(popup);
 
     marker.addTo(earthquakeLayer);
 
@@ -371,40 +546,61 @@ function renderEarthquakes() {
       eventId: quake.id,
       marker: marker
     });
-
-    row.addEventListener("click", () => {
-    selectEarthquake(quake.id);
-
-    map.setView([latitude, longitude], 8);
-    marker.openPopup();
-
-    if (window.innerWidth <= 768) {
-        document.getElementById("map").scrollIntoView({
-        behavior: "smooth",
-        block: "start"
-        });
-    }
-    });
+    markersByEventId.set(quake.id, marker);
 
     marker.on("click", () => {
       selectEarthquake(quake.id, true);
     });
   });
+
+  displayedEarthquakes.forEach((quake) => {
+    const row = rowsByEventId.get(quake.id);
+    const marker = markersByEventId.get(quake.id);
+    if (quake.id === selectedEventId) {
+      row.classList.add("selected");
+    }
+    row.addEventListener("click", () => {
+      selectEarthquake(quake.id);
+      programmaticMapMove = true;
+      try {
+        map.setView(
+          [quake.geometry.coordinates[1], quake.geometry.coordinates[0]],
+          8,
+          { animate: false }
+        );
+      } finally {
+        programmaticMapMove = false;
+      }
+      marker.openPopup();
+
+      if (window.innerWidth <= 768) {
+        document.getElementById("map").scrollIntoView({
+          behavior: "smooth",
+          block: "start"
+        });
+      }
+    });
+  });
 }
 
 function selectEarthquake(eventId, scrollToRow = false) {
+  selectedEventId = eventId;
+  let selectedRow = document.querySelector(
+    `#earthquake-list tr[data-event-id="${CSS.escape(eventId)}"]`
+  );
+  if (!selectedRow) {
+    renderEarthquakes();
+    selectedRow = document.querySelector(
+      `#earthquake-list tr[data-event-id="${CSS.escape(eventId)}"]`
+    );
+  }
+
   document.querySelectorAll("#earthquake-list tr").forEach((row) => {
     row.classList.remove("selected");
   });
-
-  const selectedRow = document.querySelector(
-    `#earthquake-list tr[data-event-id="${eventId}"]`
-  );
-
   if (!selectedRow) {
     return;
   }
-
   selectedRow.classList.add("selected");
 
   if (scrollToRow) {
@@ -415,6 +611,13 @@ function selectEarthquake(eventId, scrollToRow = false) {
   }
 }
 
+map.on("moveend", () => {
+  if (!programmaticMapMove) {
+    scheduleEarthquakeLoad();
+  }
+});
+const initialEarthquakeBounds = getEarthquakeBounds();
+loadEarthquakes(initialEarthquakeBounds, getBoundsKey(initialEarthquakeBounds));
 
 document
   .getElementById("toggle-count")
@@ -458,5 +661,3 @@ function updateSortIndicators() {
     }
   });
 }
-
-loadEarthquakes();

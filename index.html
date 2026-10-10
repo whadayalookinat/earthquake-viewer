@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pacific Northwest Earthquakes</title>
+  <title>Worldwide Earthquake Viewer</title>
 
   <link
     rel="stylesheet"
@@ -14,8 +14,8 @@
 
 <body>
   <header>
-    <h1>Pacific Northwest Earthquakes</h1>
-    <p>M2.5+ earthquakes within 500 miles</p>
+    <h1>Recent Earthquakes Worldwide</h1>
+    <p>M2.5+ earthquakes from the past 7 days · search follows the map</p>
   </header>
 
   <main>
@@ -28,7 +28,7 @@
         <button id="toggle-count">Show 100</button>
       </div>
 
-      <div id="status">Loading earthquakes...</div>
+      <div id="status" role="status" aria-live="polite">Loading earthquakes...</div>
 
       <div class="table-wrapper">
         <table>
